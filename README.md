@@ -1,2 +1,2 @@
-# vctools
- VCtools is a media toolkit for video editing, AI-powered content creation, and other tools.
+# cctools
+ cctools is a media toolkit for general content creation, video editing, AI-powered content creation, and other tools.
