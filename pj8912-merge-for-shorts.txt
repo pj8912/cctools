@@ -1,0 +1,635 @@
+Directory structure:
+└── pj8912-merge-for-shorts/
+    ├── app.py
+    ├── LICENSE
+    ├── requirements.txt
+    ├── test.py
+    ├── static/
+    │   ├── main.js
+    │   └── static.txt
+    └── templates/
+        ├── about.html
+        ├── crop.html
+        ├── header.html
+        ├── index.html
+        ├── merge.html
+        └── wrapper.html
+
+================================================
+FILE: app.py
+================================================
+from flask import Flask, request, render_template, send_from_directory,jsonify, redirect, url_for
+import os
+import datetime
+from moviepy.editor import *
+from moviepy.video.fx.all import *
+# from moviepy.video.fx.all import crop
+import proglog
+# import tqdm 
+from tqdm import tqdm
+
+
+app = Flask(__name__,static_folder='static')
+
+app.config["UPLOAD_FOLDER"] = "uploads" #uploaded files saved at uploads/ and then take for processing
+app.config["MEDIA_FOLDER"] = "static" #newly created videos
+
+
+##
+
+#about page
+@app.route("/about")
+def about():
+    return render_template('about.html')
+
+@app.route('/merge', endpoint='merge')
+def merge_page():
+    folder_path = os.path.expanduser("./uploads/gameclips")
+    filenames = [filename for filename in os.listdir(folder_path)
+             if os.path.isfile(os.path.join(folder_path, filename))]
+    
+    success_message = request.args.get('success')
+    video_filename = request.args.get('video')
+    
+    return render_template('merge.html', gameclips=filenames, success=success_message, video=video_filename)
+
+# home page
+@app.route("/", endpoint='index')
+def index():
+    folder_path = os.path.expanduser("./uploads/gameclips")
+    filenames = [filename for filename in os.listdir(folder_path)
+             if os.path.isfile(os.path.join(folder_path, filename))]
+    
+    success_message = request.args.get('success')
+    video_filename = request.args.get('video')
+    
+    return render_template('index.html', gameclips=filenames, success=success_message, video=video_filename)
+
+
+
+@app.route('/altmerge', methods=['POST'])
+def altmerge():
+    if request.method == "POST":
+        if 'file' not in request.files:
+            return render_template('index.html', error='No file selected.')
+        file = request.files['file']
+        clip2name = request.form['secfiles']
+
+        # No selected file
+        if file.filename == '':
+            return render_template('index.html', error='No file selected.')
+        filename = file.filename
+        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        clip1_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+
+        clip1 = VideoFileClip(clip1_path)    
+        if clip1.duration > 10:
+            clip1 = clip1.subclip(0,10)
+        (wx, hx) = clip1.size
+        if wx != 1920 and hx !=1080:
+            clip1 = clip1.resize(width=1920,height=1080)
+    
+        clip2= VideoFileClip("uploads/gameclips/"+clip2name)
+        if clip2.duration > clip1.duration:
+            clip2 = clip2.subclip(0, clip1.duration)
+        (wy, hy) = clip2.size
+        if wy != 1920 and hy !=1080:
+            clip2 = clip2.resize(width=1920,height=1080)
+        
+    
+        combine = clips_array([[clip1],[clip2]])
+        # combine = clips_array([[clip1],[clip2]])
+
+
+        ts = datetime.datetime.now().timestamp()
+        filename = str(ts)+".mp4"
+
+        output_path = os.path.join(app.config['MEDIA_FOLDER'], filename)
+        temp_audio_path = os.path.join(app.config['MEDIA_FOLDER'], str(ts)+'.mp3')
+        combine.write_videofile(output_path, temp_audiofile=temp_audio_path)
+        combine.close()
+        
+        clip = VideoFileClip(output_path)
+        (w, h) = clip.size
+        cropped_clip = crop(clip, width=550, height=6000) #without x and y divided
+        new_filname = "crop_shorts_"+filename
+        new_path =os.path.join(app.config['MEDIA_FOLDER'], new_filname)
+        cropped_clip.write_videofile(new_path,codec="libx264")
+        
+    
+        # return render_template('index.html', success='Video '+filename+' created', video=filename)
+        success_message = f'Video {filename} created'
+        return redirect(url_for('index', success=success_message, video=filename))
+    return redirect(url_for('index', error='Invalid request'))
+
+# shorts page
+@app.route('/shorts')
+def shorts_page():
+    success_message = request.args.get('success')
+    video_filename = request.args.get('video')
+    return render_template('crop.html', success=success_message, video=video_filename)
+
+ 
+#first function 
+@app.route('/croptoshorts', methods=['POST'])
+def crop_to_shorts():
+    if request.method == "POST":
+        if 'file' not in request.files:
+            return render_template('index.html', error='No file selected.')
+        file = request.files['file']
+        
+        # No  file selected
+        if file.filename == '':
+            return render_template('index.html', error='No file selected.')
+        filename = file.filename
+        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        clip1_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+
+
+        # creating new filename
+        ts = datetime.datetime.now().timestamp()
+        filename = str(ts)+".mp4"
+        filename="crop_short_"+filename
+        output_path = os.path.join(app.config['MEDIA_FOLDER'], filename)
+
+        # ffmpeg command line [NEW]
+        os.system(f'ffmpeg -i {clip1_path} -filter:v "crop=in_h*9/16:in_h" -c:a copy {output_path}')
+     
+        # moviepy [old]
+
+        # temp_audio_path = os.path.join(app.config['MEDIA_FOLDER'], str(ts)+'.mp3')
+        
+        # clip = VideoFileClip(clip1_path)
+        # # clip for 10 sec
+        # if clip.duration > 10:
+        #     clip = clip.subclip(0,10)
+        # (w, h) = clip.size
+        # if w != 1920 and h !=1080:
+        #     clip = clip.resize(width=1920,height=1080)
+        # bar = tqdm(total=clip.duration)
+        # cropped_clip = crop(clip, width=500, height=5000, x_center=w/1.5, y_center=h/1.5)
+        # cropped_clip.write_videofile(output_path,codec="libx264",temp_audiofile=temp_audio_path)
+        
+        success_message = f'Video {filename} created'
+        return redirect(url_for('shorts_page', success=success_message, video=filename))
+    else:
+        return redirect(url_for('shorts_page', error='Invalid request'))
+
+
+
+
+if __name__ ==  "__main__":
+    app.run(debug=True)
+
+
+
+================================================
+FILE: requirements.txt
+================================================
+blinker  
+certifi  
+charset-normalizer  
+click  
+decorator  
+Flask  
+idna  
+imageio  
+imageio-ffmpeg  
+itsdangerous  
+Jinja2  
+MarkupSafe  
+moviepy  
+numpy  
+Pillow==8.4.0
+proglog  
+pygame  
+requests  
+tqdm  
+urllib3  
+Werkzeug
+
+
+
+================================================
+FILE: test.py
+================================================
+from flask import Flask, request, render_template, send_from_directory,jsonify, redirect, url_for
+import os
+import datetime
+from moviepy.editor import *
+from moviepy.video.fx.all import *
+
+app = Flask(__name__,static_folder='static')
+
+app.config["UPLOAD_FOLDER"] = "uploads"
+app.config["MEDIA_FOLDER"] = "static" #newly created videos
+
+@app.route("/about")
+def about():
+    return render_template('about.html')
+
+@app.route("/")
+def index():
+    folder_path = os.path.expanduser("./uploads/gameclips")
+    filenames = [filename for filename in os.listdir(folder_path)
+             if os.path.isfile(os.path.join(folder_path, filename))]
+    
+    success_message = request.args.get('success')
+    video_filename = request.args.get('video')
+    
+    return render_template('index.html', gameclips=filenames, success=success_message, video=video_filename)
+    # return render_template("index.html", gameclips=filenames, testname=testname)
+
+@app.route('/uploadfile',   methods=["POST"])
+def upload():
+    if request.method == "POST":
+        if 'file' not in request.files:
+            return render_template('index.html', error='No file selected.')
+        file = request.files['file']
+        clip2name = request.form['secfiles']
+
+        # No selected file
+        if file.filename == '':
+            return render_template('index.html', error='No file selected.')
+        filename = file.filename
+        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        clip1_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        clip1 = VideoFileClip(clip1_path)    
+        if clip1.duration > 60:
+            clip1 = clip1.subclip(0,60) 
+    
+        clip2= VideoFileClip("uploads/gameclips/"+clip2name)
+        if clip2.duration > clip1.duration:
+            clip2 = clip2.subclip(0, clip1.duration)
+        
+        # Double the width of the clip
+        # Resize the clip to the new size while maintaining the aspect ratio
+
+        tr1 = ImageClip("fondo.png").set_duration(clip1.duration).set_position(("center","top"))
+        tr2 = ImageClip("fondo.png").set_duration(clip1.duration).set_position(("center","bottom"))
+              
+         clips = []     
+              
+        def clip1x(clip1):
+            wx = clip1.w
+            new_w = 2 * wx
+            clip1 = clip1.resize(width=new_w)
+            clips.append(clip1)
+
+        def clip2x(clip2):
+            w = clip2.w 
+            new_w = 3 * w
+            clip2 = clip2.resize(width=new_w)
+            w, h = clip2.size
+            new_h = h * 1.5 
+            clip2 = clip2.resize(height=new_h)
+            clips.append(clip2)
+            
+        t1 = threading.Thread(target=clip1x)
+        t1.daemon = True
+        t1.start()
+        t2 = threading.Thread(target=clip2x)
+        t2.start()
+        
+
+        combine = clips_array([[tr1],[clips[0]],[clips[1]],[tr2]])
+        t2.join()
+
+        ts = datetime.datetime.now().timestamp()
+        filename = str(ts)+".mp4"
+
+        output_path = os.path.join(app.config['MEDIA_FOLDER'], filename)
+        temp_audio_path = os.path.join(app.config['MEDIA_FOLDER'], str(ts)+'.mp3')
+        combine.write_videofile(output_path, temp_audiofile=temp_audio_path)
+        combine.close()
+        # return render_template('index.html', success='Video '+filename+' created', video=filename)
+        success_message = f'Video {filename} created'
+        return redirect(url_for('index', success=success_message, video=filename))
+
+        # return render_template('index.html', error='Invalid file format. Please upload an MP4 file.')
+
+    return redirect(url_for('index', error='Invalid request'))
+
+
+if __name__ ==  "__main__":
+    app.run(debug=True)
+
+
+
+================================================
+FILE: static/main.js
+================================================
+function hideText() {
+    var myDiv = document.getElementById('success-msg');
+    myDiv.style.display = 'none';
+}
+
+
+================================================
+FILE: static/static.txt
+================================================
+static file here!
+
+
+================================================
+FILE: templates/about.html
+================================================
+{% extends 'wrapper.html' %}
+{% block title %}Merge For Shorts{% endblock %}
+{% block content %}
+
+<div class="container text-center">
+
+    <h1 class="mt-5">
+        <a href="/" style="text-decoration:none"> Merge For Shorts </a>
+    </h1>
+</div>
+    
+
+<ul style="list-style: none;" class="mt-5 list-group p-5">
+    <li  class="list-group-item" style="cursor: pointer;">
+         The format of the video is any movie or tv series clip at the top and random videogame or life hacks videos at the bottom.
+
+    </li>
+    <li class="list-group-item" style="cursor: pointer;">
+        The application allows users to upload an video file which sits at the top and video game at the bottom which is in the uploads folder - quake_short.mp4 , where two of them are combined to form a single video file which is <= 1 minute. 
+
+    </li>
+    <li class="list-group-item" style="cursor: pointer;">
+        If the video uploaded by the user is greater than a minute it will be reduced to a minute. The progress can be seen on the terminal.
+
+    </li>
+</ul>
+
+<script>
+    var listItems = document.querySelectorAll('.list-group-item');
+
+    for (var i = 0; i < listItems.length; i++) {
+      listItems[i].addEventListener('mouseover', function() {
+        this.classList.add('active');
+      });
+
+      listItems[i].addEventListener('mouseout', function() {
+        this.classList.remove('active');
+      });
+    }
+  </script>
+
+
+
+
+
+{% endblock %}
+
+
+================================================
+FILE: templates/crop.html
+================================================
+{% extends 'wrapper.html' %}
+{% block title %}Merge For Shorts{% endblock %}
+{% block content %}
+<style>
+    .tinytext {
+        font-size: 14px;
+        font-family: monospace;
+        color: gray
+    }
+</style>
+
+<a href="/" class="m-2"> << Home</a>
+
+<div class="card card-body col-md-4 m-auto mt-5 border-0">
+
+
+    <h3>Crop video to Shorts format</h3>
+    <form action="/croptoshorts" method="POST" enctype="multipart/form-data">
+        <div class="mb-2">
+            <!-- error message -->
+            {% if error %}
+            <div class="alert alert-danger">{{ error }}</div>
+            {% endif %}
+
+            <!-- success message -->
+            {% if success %}
+            <div class="alert alert-success" id="success-msg">
+                {{ success }}
+                <span aria-hidden="true" style="margin-left: 109px;cursor: pointer;" onclick="hideText()">&times;</span>
+            </div>
+
+            <script src="{{url_for('static', filename='main.js')}}"></script>
+
+            {% endif %}
+        </div>
+        <div class="mb-2">
+            <label for="">&#x1F447;Upload Your Video </label>
+            <input id="file-input" class="form-control" name="file" type="file" accept="video/mp4">
+        </div>
+        <button class="btn bnt-primary btn-sm btn-primary" style="width: fit-content;">
+            Short it!
+        </button>
+    </form>
+</div>
+
+
+{% if success %}
+        <div class="card card-body col-md-4 m-auto mt-4">
+            <video controls>
+                <source src="{{ url_for('static', filename=video) }}" type="video/mp4">
+            </video>
+        </div>
+{% endif %}
+
+{%endblock%}
+
+
+================================================
+FILE: templates/header.html
+================================================
+<!-- <header> -->
+    <nav class="navbar navbar-expand-lg bg-body-tertiary navbar-sm">
+        <div class="collapse navbar-collapse" id="navbarSupportedContent">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+              
+                <li class="nav-item">
+                <a class="nav-link " aria-current="page" href="/">Home</a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link " aria-current="page" href="/about">About</a>
+              </li>
+
+            </ul>
+        </div>
+    </nav>
+<!-- </header> -->
+
+
+================================================
+FILE: templates/index.html
+================================================
+{% extends 'wrapper.html' %}
+{% block title %}Merge For Shorts{% endblock %}
+{% block content %}
+<style>
+    .con {
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+    }
+
+    .middleDiv {
+        position: absolute;
+        width: 200px;
+        height: 200px;
+        left: 50%;
+        top: 30%;
+        margin-left: -100px;
+        /* half of the width  */
+        margin-top: -100px;
+        /* half of the height */
+    }
+
+    .centerFlex {
+        align-items: center;
+        display: flex;
+        justify-content: center;
+        gap: 5px;
+    }
+</style>
+
+
+
+<div class="mt-5">
+
+    <div class="mb-2 w-25 m-auto">
+        {% if error %}
+        <div class="alert alert-danger">{{ error }}</div>
+        {% endif %}
+
+        {% if success %}
+        <div class="alert alert-success" id="success-msg">
+            {{ success }}
+            <span aria-hidden="true" style="margin-left: 109px;cursor: pointer;" onclick="hideText()">&times;</span>
+        </div>
+
+        <script>
+            function hideText() {
+                var myDiv = document.getElementById('success-msg');
+                myDiv.style.display = 'none';
+            }
+        </script>
+
+        {% endif %}
+    </div>
+
+    <h3 class="text-center">Short-n-Merge</h3>
+    <div class="centerFlex">
+        <a href="/shorts" class="btn btn-sm btn-primary" style="width: fit-content;">Crop to Shorts</a>
+        <a href="/merge" class="btn btn-sm btn-primary" style="width: fit-content;">Merge videos for
+            Shorts</a>
+    </div>
+</div>
+{% endblock %}
+
+
+================================================
+FILE: templates/merge.html
+================================================
+{% extends 'wrapper.html' %}
+{% block title %}Merge For Shorts{% endblock %}
+{% block content %}
+<style>
+    .tinytext {
+        font-size: 14px;
+        font-family: monospace;
+        color: gray
+    }
+</style>
+
+<a href="/" class="m-2">
+    << Home</a>
+
+        <div class="card card-body col-md-4 m-auto mt-5 border-0">
+            <h3>Merge For Shorts</h3>
+
+            <form action="/altmerge" method="post" class="mt-4" enctype="multipart/form-data">
+                <div class="mb-2">
+                    {% if error %}
+                    <div class="alert alert-danger">{{ error }}</div>
+                    {% endif %}
+
+                    {% if success %}
+                    <div class="alert alert-success" id="success-msg">
+                        {{ success }}
+                        <span aria-hidden="true" style="margin-left: 109px;cursor: pointer;"
+                            onclick="hideText()">&times;</span>
+                    </div>
+
+                    <script src="{{url_for('static', filename='main.js')}}"></script>
+
+                    {% endif %}
+
+                    <div class="mb-2">
+                        <label for="">&#x1F51D; Upload Your Video <span class="tinytext">[Video on Top]</span> </label>
+                        <input id="file-input" class="form-control" name="file" type="file" accept="video/mp4">
+                    </div>
+
+                    <div class="mb-2 mt-5">
+                        <label for="">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                                class="bi bi-film" viewBox="0 0 16 16">
+                                <path
+                                    d="M0 1a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1V1zm4 0v6h8V1H4zm8 8H4v6h8V9zM1 1v2h2V1H1zm2 3H1v2h2V4zM1 7v2h2V7H1zm2 3H1v2h2v-2zm-2 3v2h2v-2H1zM15 1h-2v2h2V1zm-2 3v2h2V4h-2zm2 3h-2v2h2V7zm-2 3v2h2v-2h-2zm2 3h-2v2h2v-2z" />
+                            </svg>
+                            Choose Secondary Clip <span class="tinytext">[Video Below]</span></label>
+                        <select name="secfiles" class="form-control">
+                            {% for i in gameclips %}
+                            {% set parts = i.split('.') %}
+                            {% set filename = parts[0] %}
+                            <option value="{{ i }}">{{ filename }}</option>
+
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="d-grid gap-2 mt-5">
+                    <button type="submit" class="btn  btn-primary">
+                        Create
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        {% if success %}
+        <div class="card card-body col-md-4 m-auto mt-4">
+            <video controls>
+                <source src="{{ url_for('static', filename=video) }}" type="video/mp4">
+            </video>
+        </div>
+        {% endif %}
+
+        {% endblock %}
+
+
+================================================
+FILE: templates/wrapper.html
+================================================
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{% block title %}{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-GLhlTQ8iRABdZLl6O3oVMWSktQOp6b7In1Zl3/Jr59b6EGGoI1aFkw7cmDA6j6gD" crossorigin="anonymous">
+
+    <style>
+
+   
+        </style>
+
+</head>
+<body>
+
+
+    {% block content %}{% endblock %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js" integrity="sha384-w76AqPfDkMBDXo30jS1Sgez6pr3x5MlQ1ZAGC+nuZB+EYdgRZgiwxhTBTkF7CXvN" crossorigin="anonymous"></script>
+</body>
+</html>
+
